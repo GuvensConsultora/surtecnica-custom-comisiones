@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Agregar campo zona de comisión en formulario de contacto -->
+    <record id="res_partner_view_form_commission_zone" model="ir.ui.view">
+        <field name="name">res.partner.form.commission.zone</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='sales_purchases']//group[@name='sale']" position="inside">
+                <field name="commission_zone_id"
+                       help="Asignar para sub-zonas. Si está vacío, se resuelve automáticamente por provincia."/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

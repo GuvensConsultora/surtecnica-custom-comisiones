@@ -18,6 +18,7 @@
     'data': [
         'security/ir.model.access.csv',
         'views/commission_zone_views.xml',
+        'views/res_partner_views.xml',
         'views/salesperson_commission_rule_views.xml',
         'views/salesperson_commission_views.xml',
         'views/account_move_views.xml',
