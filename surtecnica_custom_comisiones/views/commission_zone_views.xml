@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Tree -->
+    <record id="commission_zone_view_tree" model="ir.ui.view">
+        <field name="name">commission.zone.tree</field>
+        <field name="model">commission.zone</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+                <field name="country_id"/>
+                <field name="state_id"/>
+                <field name="company_id" groups="base.group_multi_company" optional="hide"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form -->
+    <record id="commission_zone_view_form" model="ir.ui.view">
+        <field name="name">commission.zone.form</field>
+        <field name="model">commission.zone</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="country_id"/>
+                            <field name="state_id"/>
+                        </group>
+                        <group>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search -->
+    <record id="commission_zone_view_search" model="ir.ui.view">
+        <field name="name">commission.zone.search</field>
+        <field name="model">commission.zone</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="country_id"/>
+                <field name="state_id"/>
+                <separator/>
+                <filter name="group_country" string="País"
+                        context="{'group_by': 'country_id'}"/>
+                <filter name="group_state" string="Provincia"
+                        context="{'group_by': 'state_id'}"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="commission_zone_action" model="ir.actions.act_window">
+        <field name="name">Zonas de Comisión</field>
+        <field name="res_model">commission.zone</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+</odoo>

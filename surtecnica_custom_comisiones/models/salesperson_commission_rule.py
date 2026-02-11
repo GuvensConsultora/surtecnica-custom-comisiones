@@ -4,21 +4,25 @@ from odoo import models, fields, api
 class SalespersonCommissionRule(models.Model):
     """Reglas de comisión por vendedor.
 
-    Prioridad de aplicación (la más específica gana):
-    1. vendedor + cliente + categoría → máxima
-    2. vendedor + cliente → alta
-    3. vendedor + categoría → media
-    4. vendedor solo → default/fallback
+    Prioridad por puntaje de especificidad (la más específica gana):
+      partner_id presente → +4 puntos
+      zone_id presente    → +2 puntos
+      product_category_id → +1 punto
+
+    Una sola query con ORDER BY campos DESC resuelve la prioridad.
     """
     _name = 'salesperson.commission.rule'
     _description = 'Regla de Comisión de Vendedor'
-    _order = 'salesperson_id, partner_id, product_category_id'
+    _order = 'salesperson_id, partner_id, zone_id, product_category_id'
 
     salesperson_id = fields.Many2one(
         'res.users', string='Vendedor', required=True, index=True)
     partner_id = fields.Many2one(
         'res.partner', string='Cliente',
         help='Dejar vacío para aplicar a todos los clientes')
+    zone_id = fields.Many2one(
+        'commission.zone', string='Zona',
+        help='Dejar vacío para aplicar a todas las zonas')
     product_category_id = fields.Many2one(
         'product.category', string='Categoría de Producto',
         help='Dejar vacío para aplicar a todas las categorías')
@@ -29,58 +33,47 @@ class SalespersonCommissionRule(models.Model):
         'res.company', string='Compañía',
         default=lambda self: self.env.company)
 
-    # Por qué: SQL constraint evita reglas duplicadas para la misma combinación
+    # Por qué: SQL constraint incluye zone_id para permitir reglas distintas
+    # por zona con mismo vendedor/cliente/categoría
     _sql_constraints = [
         ('unique_rule',
-         'UNIQUE(salesperson_id, partner_id, product_category_id, company_id)',
-         'Ya existe una regla para esta combinación de vendedor/cliente/categoría.'),
+         'UNIQUE(salesperson_id, partner_id, zone_id, product_category_id, company_id)',
+         'Ya existe una regla para esta combinación.'),
     ]
 
     @api.model
-    def _get_commission_percentage(self, salesperson, partner, category):
-        """Busca la regla más específica por prioridad descendente.
+    def _get_commission_percentage(self, salesperson, partner, category, zone=None):
+        """Busca la regla más específica con una sola query ordenada por puntaje.
 
-        Patrón: Specificity-based lookup — busca la combinación más precisa
-        primero y cae a reglas más genéricas si no encuentra.
+        Patrón: Single-query specificity lookup — en vez de N búsquedas
+        secuenciales, usa domain con OR por campo y ordena por campos NOT NULL.
+        La regla más específica queda primera.
 
-        Returns: (rule_record, percentage) o (False, 0.0) si no hay regla
+        Puntaje implícito por campo poblado:
+          partner_id presente → +4
+          zone_id presente    → +2
+          product_category_id → +1
+
+        Returns: (rule_record, percentage) o (browse(), 0.0) si no hay regla
         """
-        domain_base = [
-            ('salesperson_id', '=', salesperson.id),
-            ('company_id', 'in', [self.env.company.id, False]),
-        ]
         # Por qué: El commercial_partner_id agrupa contactos hijos bajo el partner comercial
         commercial_partner = partner.commercial_partner_id
+        zone_id = zone.id if zone else False
 
-        # Prioridad 1: vendedor + cliente + categoría
-        rule = self.search(domain_base + [
-            ('partner_id', '=', commercial_partner.id),
-            ('product_category_id', '=', category.id),
-        ], limit=1)
-        if rule:
-            return rule, rule.commission_percentage
-
-        # Prioridad 2: vendedor + cliente (cualquier categoría)
-        rule = self.search(domain_base + [
-            ('partner_id', '=', commercial_partner.id),
-            ('product_category_id', '=', False),
-        ], limit=1)
-        if rule:
-            return rule, rule.commission_percentage
-
-        # Prioridad 3: vendedor + categoría (cualquier cliente)
-        rule = self.search(domain_base + [
-            ('partner_id', '=', False),
-            ('product_category_id', '=', category.id),
-        ], limit=1)
-        if rule:
-            return rule, rule.commission_percentage
-
-        # Prioridad 4: vendedor solo (regla default)
-        rule = self.search(domain_base + [
-            ('partner_id', '=', False),
-            ('product_category_id', '=', False),
-        ], limit=1)
+        domain = [
+            ('salesperson_id', '=', salesperson.id),
+            ('company_id', 'in', [self.env.company.id, False]),
+            # Por qué: Cada OR permite matchear el valor exacto o vacío (wildcard)
+            '|', ('partner_id', '=', commercial_partner.id), ('partner_id', '=', False),
+            '|', ('zone_id', '=', zone_id), ('zone_id', '=', False),
+            '|', ('product_category_id', '=', category.id), ('product_category_id', '=', False),
+        ]
+        # Por qué: ORDER DESC pone los campos NOT NULL primero → más específica gana
+        rule = self.search(
+            domain,
+            order='partner_id DESC, zone_id DESC, product_category_id DESC',
+            limit=1,
+        )
         if rule:
             return rule, rule.commission_percentage
 

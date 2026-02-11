@@ -9,6 +9,7 @@
             <tree>
                 <field name="salesperson_id"/>
                 <field name="partner_id" optional="show"/>
+                <field name="zone_id" optional="show"/>
                 <field name="product_category_id" optional="show"/>
                 <field name="commission_percentage"/>
                 <field name="company_id" groups="base.group_multi_company" optional="hide"/>
@@ -30,6 +31,7 @@
                         </group>
                         <group>
                             <field name="partner_id"/>
+                            <field name="zone_id"/>
                             <field name="product_category_id"/>
                             <field name="company_id" groups="base.group_multi_company"/>
                             <field name="active" invisible="1"/>
@@ -48,10 +50,13 @@
             <search>
                 <field name="salesperson_id"/>
                 <field name="partner_id"/>
+                <field name="zone_id"/>
                 <field name="product_category_id"/>
                 <separator/>
                 <filter name="group_salesperson" string="Vendedor"
                         context="{'group_by': 'salesperson_id'}"/>
+                <filter name="group_zone" string="Zona"
+                        context="{'group_by': 'zone_id'}"/>
             </search>
         </field>
     </record>

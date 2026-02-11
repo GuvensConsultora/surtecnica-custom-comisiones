@@ -5,7 +5,8 @@
     'summary': 'Cálculo automático de comisiones: 50% al facturar, 50% al cobrar',
     'description': """
         Módulo de comisiones para vendedores con reglas variables
-        por vendedor, cliente y categoría de producto.
+        por vendedor, cliente, zona geográfica y categoría de producto.
+        - Zonas geográficas (provinciales y sub-zonas) para comisiones diferenciadas
         - 50% de comisión se devenga al confirmar factura
         - 50% restante se devenga al cobrar (amount_residual = 0)
         - Notas de crédito generan comisión negativa
@@ -13,9 +14,10 @@
     'author': 'Guvens Consultora',
     'website': 'https://guvens.com',
     'license': 'LGPL-3',
-    'depends': ['account', 'sale', 'product'],
+    'depends': ['account', 'sale', 'product', 'contacts'],
     'data': [
         'security/ir.model.access.csv',
+        'views/commission_zone_views.xml',
         'views/salesperson_commission_rule_views.xml',
         'views/salesperson_commission_views.xml',
         'views/account_move_views.xml',

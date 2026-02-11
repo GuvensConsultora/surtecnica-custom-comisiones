@@ -77,6 +77,12 @@ class AccountMove(models.Model):
 
         partner = self.partner_id
         RuleModel = self.env['salesperson.commission.rule']
+        ZoneModel = self.env['commission.zone']
+
+        # Por qué: Resuelve zona una sola vez por factura (mismo partner)
+        # 1. commission_zone_id del partner (override manual, sub-zonas)
+        # 2. Búsqueda automática por state_id del partner (zona provincial)
+        zone = ZoneModel._resolve_zone(partner)
 
         # Por qué: Agrupa por regla para crear un registro por porcentaje distinto
         # key: (rule_id, percentage) → value: sum(price_subtotal)
@@ -91,7 +97,7 @@ class AccountMove(models.Model):
 
             category = line.product_id.categ_id
             rule, percentage = RuleModel._get_commission_percentage(
-                salesperson, partner, category)
+                salesperson, partner, category, zone)
 
             if percentage <= 0:
                 continue
