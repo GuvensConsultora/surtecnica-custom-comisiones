@@ -1,114 +1,448 @@
 # Sur Técnica - Comisiones de Vendedores (Odoo 17)
 
-## Funcionamiento Nativo de Odoo
+## Problema
 
-Odoo 17 maneja vendedores en facturas mediante el campo `invoice_user_id` en `account.move`, que se hereda automáticamente del pedido de venta (`sale.order.user_id`). Sin embargo, Odoo **no incluye** un sistema de cálculo de comisiones nativo — solo asigna el vendedor.
+El cálculo de comisiones de vendedores se hacía manualmente, generando errores y demoras. Se necesitaba un sistema automático que:
+- Calcule comisiones al facturar y al cobrar (50/50)
+- Soporte porcentajes variables por vendedor, cliente y categoría de producto
+- Revierta comisiones automáticamente con Notas de Crédito
 
-### Campos estándar utilizados
-- `account.move.invoice_user_id` → Vendedor asignado
-- `account.move.partner_id` → Cliente
-- `account.move.line.price_subtotal` → Neto sin IVA por línea
-- `account.move.line.display_type` → `'product'` para líneas de producto
-- `account.move.amount_residual` → Saldo pendiente
-- `account.move.payment_state` → Estado de pago (`paid`, `in_payment`)
-- `product.product.categ_id` → Categoría de producto
+---
 
-## Solución Propuesta
+## Cómo funciona Odoo 17 (sin este módulo)
 
-Módulo `surtecnica_custom_comisiones` que automatiza el cálculo de comisiones con un esquema **50/50**: la mitad se devenga al facturar, la otra mitad al cobrar.
+Odoo 17 asigna un vendedor a cada factura vía `invoice_user_id` (heredado de `sale.order.user_id`), pero **no calcula comisiones**. Los campos estándar que aprovechamos:
 
-### Modelos
+| Campo | Modelo | Uso |
+|-------|--------|-----|
+| `invoice_user_id` | `account.move` | Vendedor asignado a la factura |
+| `payment_state` | `account.move` | Estado de pago (`not_paid`, `paid`, `in_payment`) |
+| `price_subtotal` | `account.move.line` | Neto sin IVA por línea |
+| `display_type` | `account.move.line` | `'product'` = línea de producto |
+| `commercial_partner_id` | `res.partner` | Partner comercial (agrupa contactos hijos) |
+| `categ_id` | `product.product` | Categoría del producto |
 
-#### `salesperson.commission.rule` — Reglas de Comisión
+### Flujo estándar de facturación/cobro en Odoo 17
 
-Define porcentajes de comisión con prioridad por especificidad:
+```
+Pedido de Venta (sale.order)
+  → user_id = vendedor
+  → Confirmar → Crear Factura
+      → invoice_user_id = user_id (heredado)
+      → _post() → state = 'posted', payment_state = 'not_paid'
+      → Registrar Pago → Conciliación
+          → _compute_payment_state() → payment_state = 'paid'
+```
+
+### Detalle técnico: `payment_state` es un stored computed field
+
+```python
+# Odoo 17 core: account/models/account_move.py
+payment_state = fields.Selection(
+    selection=PAYMENT_STATE_SELECTION,
+    compute='_compute_payment_state', store=True,
+)
+
+@api.depends('amount_residual', 'move_type', 'state', 'company_id')
+def _compute_payment_state(self):
+    # Analiza reconciliación de apuntes contables
+    # Determina: not_paid | partial | in_payment | paid | reversed
+```
+
+**Punto crítico**: los stored computed fields **NO pasan por `write()`**. Odoo los persiste directo a DB vía `_write()` interno. Esto significa que un override de `write()` **nunca detectaría** el cambio de `payment_state`. La forma correcta de interceptarlo es overrideando `_compute_payment_state`.
+
+---
+
+## Solución implementada
+
+### Arquitectura: 3 modelos
+
+```
+┌─────────────────────────────┐
+│  salesperson.commission.rule │  ← Reglas (% por vendedor/cliente/categoría)
+└──────────────┬──────────────┘
+               │ busca regla más específica
+               ▼
+┌─────────────────────────────┐
+│   salesperson.commission     │  ← Comisión calculada (50/50)
+└──────────────┬──────────────┘
+               │ vinculada a
+               ▼
+┌─────────────────────────────┐
+│   account.move (herencia)    │  ← Factura/NC con smart button
+└─────────────────────────────┘
+```
+
+---
+
+### Modelo 1: `salesperson.commission.rule`
+
+Define los porcentajes de comisión. La búsqueda usa **prioridad por especificidad** (la regla más precisa gana):
 
 | Prioridad | Combinación | Ejemplo |
-|-----------|-------------|---------|
-| 1 (máxima) | Vendedor + Cliente + Categoría | Juan → ClienteVIP → Obras: 8% |
-| 2 | Vendedor + Cliente | Juan → ClienteVIP: 5% |
-| 3 | Vendedor + Categoría | Juan → Obras: 3% |
+|:---------:|-------------|---------|
+| 1 (max) | Vendedor + Cliente + Categoría | Juan → Acme SA → Herramientas: 8% |
+| 2 | Vendedor + Cliente | Juan → Acme SA: 5% |
+| 3 | Vendedor + Categoría | Juan → Herramientas: 3% |
 | 4 (default) | Vendedor solo | Juan → todos: 2% |
 
-#### `salesperson.commission` — Comisión Calculada
+#### Campos
 
-Un registro por cada combinación (factura, porcentaje). Campos principales:
-- `base_amount`: Neto sin IVA
-- `commission_amount`: Comisión total (base × %)
-- `invoice_commission`: 50% por facturación
-- `collection_commission`: 50% por cobro
-- `invoice_status` / `collection_status`: `pending` o `accrued`
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `salesperson_id` | Many2one(`res.users`) | Vendedor (required) |
+| `partner_id` | Many2one(`res.partner`) | Cliente específico (vacío = todos) |
+| `product_category_id` | Many2one(`product.category`) | Categoría (vacío = todas) |
+| `commission_percentage` | Float | Porcentaje de comisión |
+| `active` | Boolean | Activo (default True) |
+| `company_id` | Many2one(`res.company`) | Compañía |
 
-#### `account.move` (herencia)
-
-- Smart button "Comisiones" en la factura
-- Override `_post()`: genera comisiones automáticamente al confirmar
-- Override `write()`: detecta pago total → marca cobro como devengado
-
-### Flujo
-
-```
-Factura confirmada (posted)
-  └─→ _post() genera comisiones
-       ├── invoice_status = 'accrued' (50% devengado)
-       └── collection_status = 'pending' (50% pendiente)
-
-Factura cobrada (payment_state = 'paid')
-  └─→ write() detecta el cambio
-       └── collection_status = 'accrued' (50% devengado)
-
-Nota de Crédito confirmada
-  └─→ _post() genera comisión NEGATIVA
-       ├── invoice_status = 'accrued'
-       └── collection_status = 'accrued' (ambos inmediato)
-```
-
-### NC (Notas de Crédito)
-
-Las NC generan comisiones con `base_amount` y `commission_amount` negativos. Ambos estados se marcan como `accrued` inmediatamente para descontar de las comisiones del vendedor.
-
-## Métodos Principales
-
-### `salesperson.commission.rule._get_commission_percentage(salesperson, partner, category)`
+#### Método principal: `_get_commission_percentage(salesperson, partner, category)`
 
 ```python
-# Patrón: Specificity-based lookup
-# Busca la regla más específica primero y cae a reglas genéricas
-# Prioridad: vendedor+cliente+categoría > vendedor+cliente > vendedor+categoría > vendedor
+@api.model
+def _get_commission_percentage(self, salesperson, partner, category):
+    """Busca la regla más específica por prioridad descendente.
+
+    Patrón: Specificity-based lookup — busca la combinación más precisa
+    primero y cae a reglas más genéricas si no encuentra.
+
+    Returns: (rule_record, percentage) o (empty_recordset, 0.0)
+    """
+    domain_base = [
+        ('salesperson_id', '=', salesperson.id),
+        ('company_id', 'in', [self.env.company.id, False]),
+    ]
+    # commercial_partner_id agrupa contactos hijos bajo el partner comercial
+    commercial_partner = partner.commercial_partner_id
+
+    # Prioridad 1: vendedor + cliente + categoría
+    rule = self.search(domain_base + [
+        ('partner_id', '=', commercial_partner.id),
+        ('product_category_id', '=', category.id),
+    ], limit=1)
+    if rule:
+        return rule, rule.commission_percentage
+
+    # Prioridad 2: vendedor + cliente (cualquier categoría)
+    rule = self.search(domain_base + [
+        ('partner_id', '=', commercial_partner.id),
+        ('product_category_id', '=', False),
+    ], limit=1)
+    if rule:
+        return rule, rule.commission_percentage
+
+    # Prioridad 3: vendedor + categoría (cualquier cliente)
+    rule = self.search(domain_base + [
+        ('partner_id', '=', False),
+        ('product_category_id', '=', category.id),
+    ], limit=1)
+    if rule:
+        return rule, rule.commission_percentage
+
+    # Prioridad 4: vendedor solo (regla default)
+    rule = self.search(domain_base + [
+        ('partner_id', '=', False),
+        ('product_category_id', '=', False),
+    ], limit=1)
+    if rule:
+        return rule, rule.commission_percentage
+
+    return self.browse(), 0.0
 ```
 
-### `account.move._generate_commissions()`
+---
+
+### Modelo 2: `salesperson.commission`
+
+Un registro por cada combinación (factura, porcentaje). Si una factura tiene líneas con distintos porcentajes, se crean múltiples registros.
+
+#### Campos
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `move_id` | Many2one(`account.move`) | Factura origen |
+| `salesperson_id` | Many2one(`res.users`) | Vendedor |
+| `rule_id` | Many2one(`salesperson.commission.rule`) | Regla aplicada |
+| `partner_id` | Many2one (related) | Cliente |
+| `base_amount` | Monetary | Neto sin IVA (suma de `price_subtotal`) |
+| `commission_percentage` | Float | % aplicado |
+| `commission_amount` | Monetary | Comisión total = base × % |
+| `invoice_commission` | Monetary | 50% por facturación |
+| `collection_commission` | Monetary | 50% por cobro |
+| `invoice_status` | Selection | `pending` / `accrued` |
+| `collection_status` | Selection | `pending` / `accrued` |
+| `currency_id` | Many2one (related) | Moneda de la factura |
+| `date` | Date (related) | Fecha factura |
+| `move_type` | Selection (related) | Tipo de movimiento |
+
+---
+
+### Modelo 3: `account.move` (herencia)
+
+Extiende la factura con comisiones y dos triggers automáticos.
+
+#### Campos agregados
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `commission_ids` | One2many(`salesperson.commission`) | Comisiones de esta factura |
+| `commission_count` | Integer (computed) | Cantidad (para smart button) |
+
+#### Override 1: `_post()` — Trigger de facturación
 
 ```python
-# Por cada línea de producto (display_type == 'product'):
-#   1. Busca regla más específica
-#   2. Agrupa montos por (rule_id, percentage)
-#   3. Crea registros de comisión con split 50/50
-# Patrón: defaultdict para agrupar líneas por porcentaje
+def _post(self, soft=True):
+    """Al confirmar factura/NC, calcula comisiones automáticamente.
+
+    Patrón: Herencia estándar — super() primero para que la factura
+    quede posted, luego generamos las comisiones.
+    """
+    posted = super()._post(soft=soft)
+    for move in posted:
+        # Solo facturas y NC de cliente generan comisiones
+        if move.move_type in ('out_invoice', 'out_refund'):
+            move._generate_commissions()
+    return posted
 ```
 
-### `account.move._post()` (override)
+#### Override 2: `_compute_payment_state()` — Trigger de cobro
 
 ```python
-# Herencia estándar: super() primero, luego genera comisiones
-# Solo para out_invoice y out_refund
+@api.depends('amount_residual', 'move_type', 'state', 'company_id')
+def _compute_payment_state(self):
+    """Detecta cuando la factura pasa a 'paid' o 'in_payment'.
+
+    Por qué override de _compute y NO de write():
+    - payment_state es stored computed field
+    - Los stored computed se persisten vía _write() interno, NO write()
+    - Un override de write() NUNCA vería el cambio de payment_state
+    - Override del compute es el patrón correcto para interceptar
+      la transición de estado de pago
+    """
+    super()._compute_payment_state()
+    for move in self:
+        if (move.move_type == 'out_invoice'
+                and move.payment_state in ('paid', 'in_payment')
+                and move.commission_ids):
+            move.commission_ids.filtered(
+                lambda c: c.collection_status == 'pending'
+            ).write({'collection_status': 'accrued'})
 ```
 
-### `account.move.write()` (override)
+#### Método: `_generate_commissions()` — Cálculo por línea y agrupamiento
 
 ```python
-# Intercepta cambios en payment_state
-# Si pasa a 'paid' o 'in_payment', devenga el 50% de cobro
+def _generate_commissions(self):
+    """Genera registros de comisión agrupados por regla/porcentaje.
+
+    Algoritmo:
+    1. Para cada línea de producto (display_type == 'product')
+    2. Busca la regla más específica para ese vendedor/cliente/categoría
+    3. Agrupa montos (price_subtotal) por (rule_id, percentage)
+    4. Crea un registro de comisión por grupo con split 50/50
+
+    Patrón: defaultdict para agrupar líneas con el mismo porcentaje
+    en un solo registro de comisión.
+    """
+    self.ensure_one()
+    # Evita duplicar comisiones si se re-confirma
+    if self.commission_ids:
+        return
+
+    salesperson = self.invoice_user_id
+    if not salesperson:
+        return
+
+    partner = self.partner_id
+    RuleModel = self.env['salesperson.commission.rule']
+
+    # key: (rule_id, percentage) → value: sum(price_subtotal)
+    grouped = defaultdict(float)
+
+    for line in self.invoice_line_ids:
+        if line.display_type != 'product':
+            continue
+        if not line.product_id:
+            continue
+
+        category = line.product_id.categ_id
+        rule, percentage = RuleModel._get_commission_percentage(
+            salesperson, partner, category)
+
+        if percentage <= 0:
+            continue
+
+        grouped[(rule.id, percentage)] += line.price_subtotal
+
+    is_refund = self.move_type == 'out_refund'
+    CommissionModel = self.env['salesperson.commission']
+
+    for (rule_id, percentage), base_amount in grouped.items():
+        # NC genera comisión negativa para revertir
+        if is_refund:
+            base_amount = -abs(base_amount)
+
+        commission_amount = base_amount * percentage / 100.0
+        invoice_commission = commission_amount / 2.0
+        collection_commission = commission_amount / 2.0
+
+        CommissionModel.create({
+            'move_id': self.id,
+            'salesperson_id': salesperson.id,
+            'rule_id': rule_id or False,
+            'base_amount': base_amount,
+            'commission_percentage': percentage,
+            'commission_amount': commission_amount,
+            'invoice_commission': invoice_commission,
+            'collection_commission': collection_commission,
+            'invoice_status': 'accrued',
+            'collection_status': 'accrued' if is_refund else 'pending',
+        })
 ```
 
-## Instalación
+---
 
-1. Copiar el módulo en la carpeta de addons custom
-2. Actualizar lista de aplicaciones
-3. Instalar "Sur Técnica - Comisiones de Vendedores"
+## Flujo completo
+
+### Factura de cliente
+
+```
+Factura confirmada (_post)
+  │
+  ├── Por cada línea de producto:
+  │     └── Busca regla más específica → obtiene %
+  │
+  ├── Agrupa líneas por (regla, %)
+  │
+  └── Crea registro(s) de comisión:
+        ├── commission_amount = base × %
+        ├── invoice_commission = 50% → invoice_status = 'accrued' ✓
+        └── collection_commission = 50% → collection_status = 'pending' ⏳
+
+Pago registrado → Conciliación → _compute_payment_state()
+  │
+  └── payment_state = 'paid'
+        └── collection_status = 'accrued' ✓
+```
+
+### Nota de Crédito
+
+```
+NC confirmada (_post)
+  │
+  └── Crea comisión NEGATIVA:
+        ├── base_amount = -|subtotal|
+        ├── commission_amount = negativo
+        ├── invoice_status = 'accrued' ✓ (inmediato)
+        └── collection_status = 'accrued' ✓ (inmediato)
+```
+
+### Ejemplo numérico
+
+Factura FA-A 0001-00000020 por $100.000 + IVA, vendedor Juan (comisión 5%):
+
+| Concepto | Valor |
+|----------|-------|
+| Base imponible | $100.000,00 |
+| Comisión total (5%) | $5.000,00 |
+| 50% facturación (devengado al confirmar) | $2.500,00 |
+| 50% cobro (devengado al cobrar) | $2.500,00 |
+
+Si después se emite NC por $20.000:
+
+| Concepto | Valor |
+|----------|-------|
+| Base imponible | -$20.000,00 |
+| Comisión total (5%) | -$1.000,00 |
+| 50% facturación | -$500,00 (devengado inmediato) |
+| 50% cobro | -$500,00 (devengado inmediato) |
+
+**Comisión neta del vendedor**: $5.000 - $1.000 = **$4.000**
+
+---
+
+## Seguridad
+
+| Grupo | Reglas | Comisiones |
+|-------|--------|------------|
+| Gerente contable (`account.group_account_manager`) | CRUD completo | CRUD completo |
+| Facturación (`account.group_account_invoice`) | Solo lectura | Solo lectura |
+
+---
+
+## Vistas
+
+| Vista | Modelo | Descripción |
+|-------|--------|-------------|
+| Tree + Form + Search | `salesperson.commission.rule` | ABM de reglas |
+| Tree + Form + Search | `salesperson.commission` | Listado de comisiones |
+| Pivot | `salesperson.commission` | Tabla cruzada vendedor × mes |
+| Graph | `salesperson.commission` | Gráfico de barras por vendedor |
+| Smart button | `account.move` (herencia) | Botón "Comisiones" en factura |
+
+### Filtros disponibles en comisiones
+
+- Por tipo: Facturas / Notas de Crédito
+- Por estado: Facturación Pendiente / Cobro Pendiente
+- Agrupar por: Vendedor / Cliente / Fecha (mes)
+
+### Menú
+
+```
+Facturación
+  └── Comisiones
+        ├── Comisiones (listado)
+        └── Reglas de Comisión (solo gerentes)
+```
+
+---
+
+## Decisiones técnicas
+
+### Por qué `_compute_payment_state` y no `write()`
+
+Los **stored computed fields** en Odoo 17 se recomputan cuando cambian sus dependencias (`amount_residual`, `state`, etc.) y se persisten a DB vía el método interno `_write()`, que **no pasa por el `write()` público**. Un override de `write()` nunca detectaría el cambio de `payment_state`.
+
+Referencia: [OCA/commission](https://github.com/OCA/commission) usa un patrón de settlement wizard con chequeo de `payment_state`, pero para nuestro caso (devengamiento automático sin liquidación manual) el override del compute es más directo y confiable.
+
+### Por qué `payment_state` y no `amount_residual == 0`
+
+En operaciones multi-moneda, diferencias de tipo de cambio pueden hacer que `amount_residual` no llegue exactamente a 0. El campo `payment_state` considera la reconciliación contable completa y es más confiable.
+
+### Por qué `price_subtotal` como base
+
+`price_subtotal` es el neto sin IVA por línea. Es el estándar para comisiones comerciales — el vendedor cobra sobre el valor del producto, no sobre los impuestos.
+
+### Por qué `commercial_partner_id` para buscar reglas
+
+En Odoo, un cliente puede tener múltiples contactos (direcciones de envío, facturación). `commercial_partner_id` normaliza al partner comercial raíz, asegurando que la regla aplique sin importar qué contacto se use en la factura.
+
+### Por qué `defaultdict` para agrupar
+
+Si una factura tiene 10 líneas de "Herramientas" (3%) y 5 de "Servicios" (5%), se crean solo 2 registros de comisión (uno por porcentaje), no 15. Reduce ruido y simplifica reportes.
+
+---
 
 ## Dependencias
 
-- `account`: Facturas, monedas, conciliación
-- `sale`: Campo `invoice_user_id` del pedido de venta
-- `product`: Categorías de producto para reglas por categoría
+```python
+'depends': ['account', 'sale', 'product']
+```
+
+| Módulo | Razón |
+|--------|-------|
+| `account` | `account.move`, monedas, `payment_state`, conciliación |
+| `sale` | `invoice_user_id` propagado desde `sale.order` |
+| `product` | `product.category` para reglas por categoría |
+
+---
+
+## Verificación
+
+1. **Reglas**: Crear reglas para un vendedor (general 2%, cliente VIP 5%, categoría Obras 3%)
+2. **Facturación**: Crear y confirmar factura → verificar comisión con `invoice_status = accrued`
+3. **Cobro**: Registrar pago total → verificar `collection_status = accrued`
+4. **NC**: Crear NC → verificar comisión negativa con ambos status `accrued`
+5. **Prioridad**: Facturar al cliente VIP con producto de Obras → debe aplicar 5% (regla vendedor+cliente) si no hay regla vendedor+cliente+categoría
+6. **Reportes**: Pivot por vendedor/mes → verificar totales

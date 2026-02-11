@@ -15,6 +15,24 @@ class AccountMove(models.Model):
         for move in self:
             move.commission_count = len(move.commission_ids)
 
+    # --- Trigger de cobro ---
+    # Por qué: payment_state es un stored computed field. Los stored computed
+    # NO pasan por write() — Odoo los persiste directo a DB vía _write().
+    # Override _compute_payment_state es la forma correcta de interceptar
+    # el cambio de estado de pago.
+    @api.depends('amount_residual', 'move_type', 'state', 'company_id')
+    def _compute_payment_state(self):
+        super()._compute_payment_state()
+        # Por qué: Después del compute estándar, chequeamos si alguna factura
+        # pasó a 'paid'/'in_payment' y tiene comisiones de cobro pendientes.
+        for move in self:
+            if (move.move_type == 'out_invoice'
+                    and move.payment_state in ('paid', 'in_payment')
+                    and move.commission_ids):
+                move.commission_ids.filtered(
+                    lambda c: c.collection_status == 'pending'
+                ).write({'collection_status': 'accrued'})
+
     def action_view_commissions(self):
         """Acción del smart button para ver comisiones de esta factura."""
         self.ensure_one()
@@ -107,23 +125,3 @@ class AccountMove(models.Model):
                 # Por qué: NC devenga ambos 50% al instante (descuenta de una)
                 'collection_status': 'accrued' if is_refund else 'pending',
             })
-
-    def write(self, vals):
-        """Override: detecta cuando la factura queda totalmente cobrada.
-
-        Patrón: Intercepta write() para detectar cambio en amount_residual.
-        Cuando amount_residual llega a 0, marca las comisiones de cobro
-        como devengadas.
-        """
-        res = super().write(vals)
-        # Por qué: Solo chequeamos si se tocó amount_residual o payment_state
-        # payment_state es más confiable que amount_residual para detectar pago total
-        if 'payment_state' in vals or 'amount_residual' in vals:
-            for move in self:
-                if (move.move_type == 'out_invoice'
-                        and move.payment_state in ('paid', 'in_payment')
-                        and move.commission_ids):
-                    move.commission_ids.filtered(
-                        lambda c: c.collection_status == 'pending'
-                    ).write({'collection_status': 'accrued'})
-        return res
