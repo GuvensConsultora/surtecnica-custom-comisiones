@@ -86,6 +86,57 @@ Define los porcentajes de comisión. La búsqueda usa **prioridad por especifici
 | 3 | Vendedor + Categoría | Juan → Herramientas: 3% |
 | 4 (default) | Vendedor solo | Juan → todos: 2% |
 
+#### Cómo configurar las reglas
+
+Las reglas se cargan en **Facturación → Comisiones → Reglas de Comisión** (acceso solo gerentes contables).
+
+**Regla sin cliente = aplica a TODOS los clientes por igual.** Es la comisión default del vendedor. Para diferenciar por cliente o categoría, se crean reglas adicionales más específicas que la overridean.
+
+#### Ejemplo práctico: Vendedor "Juan Pérez"
+
+Supongamos que configuramos estas 4 reglas para Juan:
+
+| # | Vendedor | Cliente | Categoría | % | Uso |
+|---|----------|---------|-----------|---|-----|
+| R1 | Juan Pérez | *(vacío)* | *(vacío)* | 2% | Default para todos los clientes y productos |
+| R2 | Juan Pérez | Acme SA | *(vacío)* | 5% | Acme SA paga más comisión por ser VIP |
+| R3 | Juan Pérez | *(vacío)* | Herramientas | 3% | Herramientas tiene mayor margen |
+| R4 | Juan Pérez | Acme SA | Herramientas | 8% | Acme SA + Herramientas = máxima comisión |
+
+**Escenario 1: Factura a "López SRL" por productos de categoría "Insumos"**
+- No hay regla para López SRL ni para Insumos
+- Aplica **R1** (default) → **2%**
+
+**Escenario 2: Factura a "Acme SA" por productos de categoría "Insumos"**
+- Existe regla para Acme SA (R2), no hay regla para Insumos
+- Aplica **R2** (vendedor + cliente) → **5%**
+
+**Escenario 3: Factura a "López SRL" por productos de categoría "Herramientas"**
+- No hay regla para López SRL, pero sí para Herramientas (R3)
+- Aplica **R3** (vendedor + categoría) → **3%**
+
+**Escenario 4: Factura a "Acme SA" por productos de categoría "Herramientas"**
+- Existe regla exacta para Acme SA + Herramientas (R4)
+- Aplica **R4** (vendedor + cliente + categoría) → **8%**
+
+**Escenario 5: Factura mixta a "Acme SA" con 3 líneas**
+
+| Línea | Producto | Categoría | Subtotal | Regla | % |
+|-------|----------|-----------|----------|-------|---|
+| 1 | Taladro | Herramientas | $50.000 | R4 | 8% |
+| 2 | Tornillos | Insumos | $10.000 | R2 | 5% |
+| 3 | Guantes | Insumos | $5.000 | R2 | 5% |
+
+Se crean **2 registros de comisión** (agrupados por porcentaje):
+
+| Regla | Base | % | Comisión | 50% Factura | 50% Cobro |
+|-------|------|---|----------|-------------|-----------|
+| R4 (Herramientas) | $50.000 | 8% | $4.000 | $2.000 | $2.000 |
+| R2 (Acme SA) | $15.000 | 5% | $750 | $375 | $375 |
+| **Total** | **$65.000** | | **$4.750** | **$2.375** | **$2.375** |
+
+> **Tip:** Si solo necesitás una comisión fija para un vendedor, basta con crear una única regla sin cliente ni categoría. Esa regla aplica a todas sus ventas.
+
 #### Campos
 
 | Campo | Tipo | Descripción |
