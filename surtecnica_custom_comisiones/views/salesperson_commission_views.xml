@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Tree -->
+    <record id="salesperson_commission_view_tree" model="ir.ui.view">
+        <field name="name">salesperson.commission.tree</field>
+        <field name="model">salesperson.commission</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="date"/>
+                <field name="move_id"/>
+                <field name="move_type" optional="hide"/>
+                <field name="salesperson_id"/>
+                <field name="partner_id"/>
+                <field name="base_amount" sum="Total Base"/>
+                <field name="commission_percentage"/>
+                <field name="commission_amount" sum="Total Comisión"/>
+                <field name="invoice_commission" sum="Total Facturación"/>
+                <field name="invoice_status"
+                       decoration-success="invoice_status == 'accrued'"
+                       decoration-warning="invoice_status == 'pending'"
+                       widget="badge"/>
+                <field name="collection_commission" sum="Total Cobro"/>
+                <field name="collection_status"
+                       decoration-success="collection_status == 'accrued'"
+                       decoration-warning="collection_status == 'pending'"
+                       widget="badge"/>
+                <field name="currency_id" column_invisible="True"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form -->
+    <record id="salesperson_commission_view_form" model="ir.ui.view">
+        <field name="name">salesperson.commission.form</field>
+        <field name="model">salesperson.commission</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group string="Origen">
+                            <field name="move_id"/>
+                            <field name="salesperson_id"/>
+                            <field name="partner_id"/>
+                            <field name="rule_id"/>
+                            <field name="date"/>
+                        </group>
+                        <group string="Comisión">
+                            <field name="base_amount"/>
+                            <field name="commission_percentage"/>
+                            <field name="commission_amount"/>
+                            <field name="currency_id" invisible="1"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Facturación (50%)">
+                            <field name="invoice_commission"/>
+                            <field name="invoice_status" widget="badge"/>
+                        </group>
+                        <group string="Cobro (50%)">
+                            <field name="collection_commission"/>
+                            <field name="collection_status" widget="badge"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search -->
+    <record id="salesperson_commission_view_search" model="ir.ui.view">
+        <field name="name">salesperson.commission.search</field>
+        <field name="model">salesperson.commission</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="salesperson_id"/>
+                <field name="partner_id"/>
+                <field name="move_id"/>
+                <filter name="filter_invoices" string="Facturas"
+                        domain="[('move_type', '=', 'out_invoice')]"/>
+                <filter name="filter_refunds" string="Notas de Crédito"
+                        domain="[('move_type', '=', 'out_refund')]"/>
+                <separator/>
+                <filter name="invoice_pending" string="Facturación Pendiente"
+                        domain="[('invoice_status', '=', 'pending')]"/>
+                <filter name="collection_pending" string="Cobro Pendiente"
+                        domain="[('collection_status', '=', 'pending')]"/>
+                <separator/>
+                <filter name="group_salesperson" string="Vendedor"
+                        context="{'group_by': 'salesperson_id'}"/>
+                <filter name="group_partner" string="Cliente"
+                        context="{'group_by': 'partner_id'}"/>
+                <filter name="group_date" string="Fecha"
+                        context="{'group_by': 'date:month'}"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- Pivot -->
+    <record id="salesperson_commission_view_pivot" model="ir.ui.view">
+        <field name="name">salesperson.commission.pivot</field>
+        <field name="model">salesperson.commission</field>
+        <field name="arch" type="xml">
+            <pivot>
+                <field name="salesperson_id" type="row"/>
+                <field name="date" type="col" interval="month"/>
+                <field name="commission_amount" type="measure"/>
+                <field name="invoice_commission" type="measure"/>
+                <field name="collection_commission" type="measure"/>
+                <field name="base_amount" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <!-- Graph -->
+    <record id="salesperson_commission_view_graph" model="ir.ui.view">
+        <field name="name">salesperson.commission.graph</field>
+        <field name="model">salesperson.commission</field>
+        <field name="arch" type="xml">
+            <graph type="bar">
+                <field name="salesperson_id"/>
+                <field name="commission_amount" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="salesperson_commission_action" model="ir.actions.act_window">
+        <field name="name">Comisiones</field>
+        <field name="res_model">salesperson.commission</field>
+        <field name="view_mode">tree,form,pivot,graph</field>
+        <field name="search_view_id" ref="salesperson_commission_view_search"/>
+    </record>
+
+</odoo>

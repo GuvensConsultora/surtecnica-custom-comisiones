@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Menú principal bajo Facturación -->
+    <menuitem id="menu_commission_root"
+              name="Comisiones"
+              parent="account.menu_finance"
+              sequence="40"/>
+
+    <menuitem id="menu_commission_list"
+              name="Comisiones"
+              parent="menu_commission_root"
+              action="salesperson_commission_action"
+              sequence="10"/>
+
+    <menuitem id="menu_commission_rules"
+              name="Reglas de Comisión"
+              parent="menu_commission_root"
+              action="salesperson_commission_rule_action"
+              sequence="20"
+              groups="account.group_account_manager"/>
+
+</odoo>

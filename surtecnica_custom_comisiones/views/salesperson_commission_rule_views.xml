@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Tree -->
+    <record id="salesperson_commission_rule_view_tree" model="ir.ui.view">
+        <field name="name">salesperson.commission.rule.tree</field>
+        <field name="model">salesperson.commission.rule</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="salesperson_id"/>
+                <field name="partner_id" optional="show"/>
+                <field name="product_category_id" optional="show"/>
+                <field name="commission_percentage"/>
+                <field name="company_id" groups="base.group_multi_company" optional="hide"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form -->
+    <record id="salesperson_commission_rule_view_form" model="ir.ui.view">
+        <field name="name">salesperson.commission.rule.form</field>
+        <field name="model">salesperson.commission.rule</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="salesperson_id"/>
+                            <field name="commission_percentage"/>
+                        </group>
+                        <group>
+                            <field name="partner_id"/>
+                            <field name="product_category_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search -->
+    <record id="salesperson_commission_rule_view_search" model="ir.ui.view">
+        <field name="name">salesperson.commission.rule.search</field>
+        <field name="model">salesperson.commission.rule</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="salesperson_id"/>
+                <field name="partner_id"/>
+                <field name="product_category_id"/>
+                <separator/>
+                <filter name="group_salesperson" string="Vendedor"
+                        context="{'group_by': 'salesperson_id'}"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="salesperson_commission_rule_action" model="ir.actions.act_window">
+        <field name="name">Reglas de Comisión</field>
+        <field name="res_model">salesperson.commission.rule</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+</odoo>

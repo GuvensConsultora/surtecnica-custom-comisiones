@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_commission_rule_manager,salesperson.commission.rule.manager,model_salesperson_commission_rule,account.group_account_manager,1,1,1,1
+access_commission_rule_user,salesperson.commission.rule.user,model_salesperson_commission_rule,account.group_account_invoice,1,0,0,0
+access_commission_manager,salesperson.commission.manager,model_salesperson_commission,account.group_account_manager,1,1,1,1
+access_commission_user,salesperson.commission.user,model_salesperson_commission,account.group_account_invoice,1,0,0,0
