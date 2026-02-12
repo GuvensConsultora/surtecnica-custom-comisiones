@@ -9,6 +9,8 @@
             <tree>
                 <field name="salesperson_id"/>
                 <field name="partner_id" optional="show"/>
+                <field name="zone_country_id" optional="show"/>
+                <field name="zone_state_id" optional="show"/>
                 <field name="zone_id" optional="show"/>
                 <field name="product_category_id" optional="show"/>
                 <field name="commission_percentage"/>
