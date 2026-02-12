@@ -12,6 +12,7 @@
                 <field name="zone_country_id" optional="show"/>
                 <field name="zone_state_id" optional="show"/>
                 <field name="zone_id" optional="show"/>
+                <field name="product_id" optional="show"/>
                 <field name="product_category_id" optional="show"/>
                 <field name="commission_percentage"/>
                 <field name="company_id" groups="base.group_multi_company" optional="hide"/>
@@ -38,6 +39,7 @@
                                    domain="[('country_id', '=', zone_country_id)]"/>
                             <field name="zone_id"
                                    domain="[('country_id', '=?', zone_country_id), ('state_id', '=?', zone_state_id)]"/>
+                            <field name="product_id"/>
                             <field name="product_category_id"/>
                             <field name="company_id" groups="base.group_multi_company"/>
                             <field name="active" invisible="1"/>
@@ -57,6 +59,7 @@
                 <field name="salesperson_id"/>
                 <field name="partner_id"/>
                 <field name="zone_id"/>
+                <field name="product_id"/>
                 <field name="product_category_id"/>
                 <separator/>
                 <filter name="group_salesperson" string="Vendedor"

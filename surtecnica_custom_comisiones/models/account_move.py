@@ -95,9 +95,10 @@ class AccountMove(models.Model):
             if not line.product_id:
                 continue
 
-            category = line.product_id.categ_id
+            product = line.product_id
+            category = product.categ_id
             rule, percentage = RuleModel._get_commission_percentage(
-                salesperson, partner, category, zone)
+                salesperson, partner, product, category, zone)
 
             if percentage <= 0:
                 continue

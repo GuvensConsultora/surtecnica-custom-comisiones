@@ -5,15 +5,16 @@ class SalespersonCommissionRule(models.Model):
     """Reglas de comisión por vendedor.
 
     Prioridad por puntaje de especificidad (la más específica gana):
-      partner_id presente → +4 puntos
-      zone_id presente    → +2 puntos
-      product_category_id → +1 punto
+      partner_id presente          → +8 puntos
+      zone_id presente             → +4 puntos
+      product_id presente          → +2 puntos
+      product_category_id presente → +1 punto
 
     Una sola query con ORDER BY campos DESC resuelve la prioridad.
     """
     _name = 'salesperson.commission.rule'
     _description = 'Regla de Comisión de Vendedor'
-    _order = 'salesperson_id, partner_id, zone_id, product_category_id'
+    _order = 'salesperson_id, partner_id, zone_id, product_id, product_category_id'
 
     salesperson_id = fields.Many2one(
         'res.users', string='Vendedor', required=True, index=True)
@@ -29,6 +30,9 @@ class SalespersonCommissionRule(models.Model):
     zone_id = fields.Many2one(
         'commission.zone', string='Zona',
         help='Dejar vacío para aplicar a todas las zonas')
+    product_id = fields.Many2one(
+        'product.product', string='Producto',
+        help='Dejar vacío para aplicar a todos los productos')
     product_category_id = fields.Many2one(
         'product.category', string='Categoría de Producto',
         help='Dejar vacío para aplicar a todas las categorías')
@@ -43,7 +47,7 @@ class SalespersonCommissionRule(models.Model):
     # por zona con mismo vendedor/cliente/categoría
     _sql_constraints = [
         ('unique_rule',
-         'UNIQUE(salesperson_id, partner_id, zone_id, product_category_id, company_id)',
+         'UNIQUE(salesperson_id, partner_id, zone_id, product_id, product_category_id, company_id)',
          'Ya existe una regla para esta combinación.'),
     ]
 
@@ -66,7 +70,7 @@ class SalespersonCommissionRule(models.Model):
             self.zone_state_id = self.zone_id.state_id
 
     @api.model
-    def _get_commission_percentage(self, salesperson, partner, category, zone=None):
+    def _get_commission_percentage(self, salesperson, partner, product, category, zone=None):
         """Busca la regla más específica con una sola query ordenada por puntaje.
 
         Patrón: Single-query specificity lookup — en vez de N búsquedas
@@ -74,15 +78,17 @@ class SalespersonCommissionRule(models.Model):
         La regla más específica queda primera.
 
         Puntaje implícito por campo poblado:
-          partner_id presente → +4
-          zone_id presente    → +2
-          product_category_id → +1
+          partner_id presente          → +8
+          zone_id presente             → +4
+          product_id presente          → +2
+          product_category_id presente → +1
 
         Returns: (rule_record, percentage) o (browse(), 0.0) si no hay regla
         """
         # Por qué: El commercial_partner_id agrupa contactos hijos bajo el partner comercial
         commercial_partner = partner.commercial_partner_id
         zone_id = zone.id if zone else False
+        product_id = product.id if product else False
 
         domain = [
             ('salesperson_id', '=', salesperson.id),
@@ -90,12 +96,13 @@ class SalespersonCommissionRule(models.Model):
             # Por qué: Cada OR permite matchear el valor exacto o vacío (wildcard)
             '|', ('partner_id', '=', commercial_partner.id), ('partner_id', '=', False),
             '|', ('zone_id', '=', zone_id), ('zone_id', '=', False),
+            '|', ('product_id', '=', product_id), ('product_id', '=', False),
             '|', ('product_category_id', '=', category.id), ('product_category_id', '=', False),
         ]
         # Por qué: ORDER DESC pone los campos NOT NULL primero → más específica gana
         rule = self.search(
             domain,
-            order='partner_id DESC, zone_id DESC, product_category_id DESC',
+            order='partner_id DESC, zone_id DESC, product_id DESC, product_category_id DESC',
             limit=1,
         )
         if rule:
