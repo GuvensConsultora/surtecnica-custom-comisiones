@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
-    <!-- Menú principal bajo Facturación -->
+    <!-- Menú principal bajo Contabilidad → Clientes -->
     <menuitem id="menu_commission_root"
               name="Comisiones"
-              parent="account.menu_finance"
-              sequence="40"/>
+              parent="account.menu_finance_receivables"
+              sequence="99"/>
 
     <menuitem id="menu_commission_list"
               name="Comisiones"
