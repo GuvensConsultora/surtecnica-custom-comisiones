@@ -20,6 +20,12 @@ class SalespersonCommissionRule(models.Model):
     partner_id = fields.Many2one(
         'res.partner', string='Cliente',
         help='Dejar vacío para aplicar a todos los clientes')
+    # Por qué: Campos auxiliares stored para filtrar el dropdown de zona.
+    # Flujo: país → filtra provincia → filtra zona. Onchange en cascada.
+    zone_country_id = fields.Many2one(
+        'res.country', string='País')
+    zone_state_id = fields.Many2one(
+        'res.country.state', string='Provincia')
     zone_id = fields.Many2one(
         'commission.zone', string='Zona',
         help='Dejar vacío para aplicar a todas las zonas')
@@ -40,6 +46,24 @@ class SalespersonCommissionRule(models.Model):
          'UNIQUE(salesperson_id, partner_id, zone_id, product_category_id, company_id)',
          'Ya existe una regla para esta combinación.'),
     ]
+
+    @api.onchange('zone_country_id')
+    def _onchange_zone_country_id(self):
+        # Por qué: Al cambiar país, provincia y zona previas ya no son válidas
+        self.zone_state_id = False
+        self.zone_id = False
+
+    @api.onchange('zone_state_id')
+    def _onchange_zone_state_id(self):
+        # Por qué: Al cambiar provincia, la zona previa ya no es válida
+        self.zone_id = False
+
+    @api.onchange('zone_id')
+    def _onchange_zone_id(self):
+        # Por qué: Al seleccionar zona, autocompletar país/provincia desde la zona
+        if self.zone_id:
+            self.zone_country_id = self.zone_id.country_id
+            self.zone_state_id = self.zone_id.state_id
 
     @api.model
     def _get_commission_percentage(self, salesperson, partner, category, zone=None):
