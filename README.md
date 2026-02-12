@@ -9,6 +9,288 @@ El cálculo de comisiones de vendedores se hacía manualmente, generando errores
 
 ---
 
+## Guía de parametrización paso a paso
+
+### Paso 1: Crear zonas geográficas
+
+**Ir a: Facturación → Comisiones → Zonas**
+
+Las zonas representan regiones geográficas donde operan los vendedores. Hay dos tipos:
+
+#### Zonas provinciales (matcheo automático)
+
+Se crean con país + provincia. Cualquier cliente que tenga esa provincia en su ficha se asocia automáticamente a la zona, sin intervención manual.
+
+| Zona | País | Provincia | Comportamiento |
+|------|------|-----------|----------------|
+| Buenos Aires | Argentina | Buenos Aires | Auto-matchea todos los clientes con provincia = Buenos Aires |
+| Córdoba | Argentina | Córdoba | Auto-matchea todos los clientes con provincia = Córdoba |
+| Santa Fe | Argentina | Santa Fe | Auto-matchea todos los clientes con provincia = Santa Fe |
+
+#### Sub-zonas (asignación manual)
+
+Cuando una provincia necesita dividirse en áreas comerciales distintas, se crean sub-zonas con el mismo país + provincia pero nombre diferente. Estas **requieren asignación manual** en el contacto.
+
+| Zona | País | Provincia | Comportamiento |
+|------|------|-----------|----------------|
+| Norte Buenos Aires | Argentina | Buenos Aires | Solo para clientes asignados manualmente |
+| Sur Buenos Aires | Argentina | Buenos Aires | Solo para clientes asignados manualmente |
+| Centro Córdoba | Argentina | Córdoba | Solo para clientes asignados manualmente |
+
+### Paso 2: Asignar zonas a contactos (solo para sub-zonas)
+
+**Ir a: Contactos → Abrir un contacto → Pestaña "Ventas y compras"**
+
+El campo **"Zona de Comisión"** aparece en la sección de Ventas. Este campo se filtra automáticamente según el país y la provincia del contacto: si el contacto tiene Argentina / Buenos Aires, solo muestra las zonas de Buenos Aires.
+
+**Cuándo asignar manualmente:**
+- Si el cliente debe pertenecer a una sub-zona específica (ej: "Norte Buenos Aires")
+- Si el matcheo automático por provincia no es suficiente
+
+**Cuándo NO es necesario:**
+- Si solo se usan zonas provinciales (el matcheo es automático por provincia)
+- Si el cliente no tiene reglas diferenciadas por zona
+
+#### Lógica de resolución de zona
+
+Cuando se confirma una factura, el sistema determina la zona del cliente así:
+
+```
+1. ¿El contacto tiene "Zona de Comisión" asignada manualmente?
+   → SÍ: Usa esa zona (sub-zona manual)
+   → NO: Continúa...
+
+2. ¿El contacto tiene provincia (state_id)?
+   → SÍ: Busca una zona que tenga esa provincia y país
+         → Encontró: Usa esa zona (matcheo automático provincial)
+         → No encontró: Sin zona
+   → NO: Sin zona
+```
+
+**Ejemplo concreto:**
+
+| Contacto | Provincia | Zona manual | Zona resuelta | Por qué |
+|----------|-----------|-------------|---------------|---------|
+| Acme SA | Buenos Aires | *(vacío)* | Buenos Aires | Auto-matcheo por provincia |
+| Ferretería López | Buenos Aires | Norte Buenos Aires | Norte Buenos Aires | Override manual |
+| Constructor Sur SRL | Buenos Aires | Sur Buenos Aires | Sur Buenos Aires | Override manual |
+| Metalúrgica Centro | Córdoba | *(vacío)* | Córdoba | Auto-matcheo por provincia |
+| Cliente Nuevo | Mendoza | *(vacío)* | *(sin zona)* | No existe zona para Mendoza |
+
+### Paso 3: Crear reglas de comisión
+
+**Ir a: Facturación → Comisiones → Reglas de Comisión**
+
+Cada regla define un porcentaje de comisión para un vendedor. Los campos opcionales (cliente, zona, categoría) refinan cuándo aplica la regla. **Cuantos más campos completos, más específica es la regla y mayor prioridad tiene.**
+
+#### Campos de una regla
+
+| Campo | Obligatorio | Descripción |
+|-------|:-----------:|-------------|
+| Vendedor | Sí | El vendedor al que aplica |
+| Cliente | No | Dejar vacío = aplica a todos los clientes |
+| Zona | No | Dejar vacío = aplica a todas las zonas |
+| Categoría de Producto | No | Dejar vacío = aplica a todas las categorías |
+| Comisión (%) | Sí | Porcentaje sobre el neto sin IVA |
+
+#### Sistema de prioridad (la regla más específica gana)
+
+Cada campo opcional que se completa suma puntos de prioridad:
+
+| Campo completado | Puntos |
+|------------------|:------:|
+| Cliente | +4 |
+| Zona | +2 |
+| Categoría de producto | +1 |
+
+La regla con mayor puntaje es la que se aplica. Tabla de prioridades:
+
+| Puntaje | Regla tiene... | Ejemplo |
+|:-------:|----------------|---------|
+| 7 | Cliente + Zona + Categoría | Acme SA + Buenos Aires + Herramientas → 10% |
+| 6 | Cliente + Zona | Acme SA + Buenos Aires → 8% |
+| 5 | Cliente + Categoría | Acme SA + Herramientas → 7% |
+| 4 | Cliente | Acme SA → 6% |
+| 3 | Zona + Categoría | Córdoba + Herramientas → 3.5% |
+| 2 | Zona | Buenos Aires → 4% |
+| 1 | Categoría | Herramientas → 3% |
+| 0 | *(todo vacío)* | Default del vendedor → 2% |
+
+#### Ejemplo completo de parametrización
+
+**Vendedor: Juan Pérez** — Configuramos 6 reglas:
+
+| # | Cliente | Zona | Categoría | % | Uso |
+|---|---------|------|-----------|:-:|-----|
+| R1 | *(vacío)* | *(vacío)* | *(vacío)* | 2% | Default para todas las ventas de Juan |
+| R2 | *(vacío)* | Buenos Aires | *(vacío)* | 4% | Clientes de Buenos Aires pagan más |
+| R3 | *(vacío)* | Norte Buenos Aires | *(vacío)* | 5% | Sub-zona Norte BA es premium |
+| R4 | *(vacío)* | Córdoba | Herramientas | 3.5% | Herramientas en Córdoba tiene margen especial |
+| R5 | Acme SA | *(vacío)* | *(vacío)* | 6% | Acme SA es cliente VIP |
+| R6 | Acme SA | Buenos Aires | Herramientas | 10% | Máxima comisión: VIP + BA + Herramientas |
+
+**Resultados al facturar:**
+
+| Factura para... | Zona resuelta | Categoría | Regla aplicada | % | Razón |
+|-----------------|---------------|-----------|:--------------:|:-:|-------|
+| López SRL (Mendoza) | *(sin zona)* | Insumos | R1 | 2% | No matchea zona ni categoría → default |
+| López SRL (Mendoza) | *(sin zona)* | Herramientas | R1 | 2% | No hay regla solo-categoría de Herramientas sin zona |
+| Distribuidora BA (Bs.As.) | Buenos Aires | Insumos | R2 | 4% | Matchea zona Buenos Aires |
+| Ferretería Norte (Bs.As.) | Norte Buenos Aires | Insumos | R3 | 5% | Sub-zona Norte BA (asignada manualmente) |
+| Metalúrgica Cba (Córdoba) | Córdoba | Herramientas | R4 | 3.5% | Zona Córdoba + categoría Herramientas |
+| Metalúrgica Cba (Córdoba) | Córdoba | Insumos | R1 | 2% | Zona Córdoba sin regla para Insumos → default |
+| Acme SA (Bs.As.) | Buenos Aires | Insumos | R5 | 6% | Cliente específico (puntaje 4) > zona (puntaje 2) |
+| Acme SA (Bs.As.) | Buenos Aires | Herramientas | R6 | 10% | Cliente + zona + categoría (puntaje 7) |
+
+#### Factura mixta (varias categorías)
+
+Si una factura tiene líneas de distintas categorías, cada línea busca su propia regla. Se generan registros de comisión agrupados por porcentaje.
+
+**Factura de Acme SA con 3 líneas:**
+
+| Línea | Producto | Categoría | Subtotal sin IVA | Regla | % |
+|-------|----------|-----------|:----------------:|:-----:|:-:|
+| 1 | Taladro Bosch | Herramientas | $50.000 | R6 | 10% |
+| 2 | Tornillos x1000 | Insumos | $10.000 | R5 | 6% |
+| 3 | Guantes | Insumos | $5.000 | R5 | 6% |
+
+**Registros de comisión generados (agrupados por %):**
+
+| Regla | Base | % | Comisión total | 50% Facturación | 50% Cobro |
+|:-----:|:----:|:-:|:--------------:|:---------------:|:---------:|
+| R6 | $50.000 | 10% | $5.000 | $2.500 (devengado) | $2.500 (pendiente) |
+| R5 | $15.000 | 6% | $900 | $450 (devengado) | $450 (pendiente) |
+| **Total** | **$65.000** | | **$5.900** | **$2.950** | **$2.950** |
+
+---
+
+## Cómo funciona el cálculo
+
+### Trigger 1: Al confirmar factura (50% facturación)
+
+Cuando se confirma una factura o nota de crédito de cliente:
+
+1. El sistema identifica al **vendedor** (`invoice_user_id`)
+2. **Resuelve la zona** del cliente (manual → automática por provincia → sin zona)
+3. Por cada **línea de producto**:
+   - Identifica la **categoría** del producto
+   - Busca la **regla más específica** que matchee vendedor + cliente + zona + categoría
+   - Obtiene el **porcentaje**
+4. **Agrupa** las líneas que comparten el mismo porcentaje
+5. Calcula la comisión: `base_neta_sin_iva × porcentaje / 100`
+6. Divide 50/50:
+   - **50% facturación** → se devenga inmediatamente (estado: `Devengado`)
+   - **50% cobro** → queda pendiente (estado: `Pendiente`)
+
+### Trigger 2: Al cobrar la factura (50% cobro)
+
+Cuando la factura pasa a estado de pago `paid` o `in_payment` (pago total registrado):
+
+- El **50% de cobro** pendiente pasa a `Devengado`
+- La comisión queda 100% devengada
+
+### Notas de Crédito
+
+Las NC generan comisión **negativa** (restan). Ambos 50% se devengan al instante porque la NC no tiene cobro pendiente.
+
+### Ejemplo numérico completo
+
+**Paso 1:** Factura FA-A 0001-00000020 a Acme SA por $100.000 + IVA (vendedor Juan, comisión 6%):
+
+| Momento | Evento | Comisión total | 50% Facturación | 50% Cobro |
+|---------|--------|:--------------:|:---------------:|:---------:|
+| Confirmar factura | `_post()` | $6.000 | $3.000 ✓ Devengado | $3.000 ⏳ Pendiente |
+| Registrar pago | `_compute_payment_state()` | $6.000 | $3.000 ✓ Devengado | $3.000 ✓ Devengado |
+
+**Paso 2:** NC por $20.000 (misma regla 6%):
+
+| Momento | Evento | Comisión total | 50% Facturación | 50% Cobro |
+|---------|--------|:--------------:|:---------------:|:---------:|
+| Confirmar NC | `_post()` | -$1.200 | -$600 ✓ Devengado | -$600 ✓ Devengado |
+
+**Resultado neto de Juan:** $6.000 - $1.200 = **$4.800**
+
+---
+
+## Reportes
+
+### Menú de acceso
+
+```
+Facturación
+  └── Comisiones
+        ├── Comisiones          ← Listado, pivot, gráfico
+        ├── Reglas de Comisión  ← Solo gerentes contables
+        └── Zonas               ← Solo gerentes contables
+```
+
+### Vista de lista (Comisiones)
+
+Muestra todas las comisiones generadas con columnas sumables:
+
+```
+┌──────────┬─────────────────────┬────────────┬───────────┬──────────┬───────┬───────────┬─────────────┬──────────┬──────────────┬──────────┐
+│ Fecha    │ Factura             │ Vendedor   │ Cliente   │ Base     │ %     │ Comisión  │ Facturación │ Estado   │ Cobro        │ Estado   │
+├──────────┼─────────────────────┼────────────┼───────────┼──────────┼───────┼───────────┼─────────────┼──────────┼──────────────┼──────────┤
+│ 01/02/26 │ FA-A 0001-00000020  │ Juan Pérez │ Acme SA   │ $100.000 │ 6,00  │ $6.000,00 │ $3.000,00   │ Deveng.  │ $3.000,00    │ Pendient.│
+│ 01/02/26 │ FA-A 0001-00000021  │ Juan Pérez │ López SRL │ $50.000  │ 2,00  │ $1.000,00 │ $500,00     │ Deveng.  │ $500,00      │ Deveng.  │
+│ 03/02/26 │ NC-A 0001-00000005  │ Juan Pérez │ Acme SA   │ -$20.000 │ 6,00  │-$1.200,00 │ -$600,00    │ Deveng.  │ -$600,00     │ Deveng.  │
+├──────────┼─────────────────────┼────────────┼───────────┼──────────┼───────┼───────────┼─────────────┼──────────┼──────────────┼──────────┤
+│          │                     │            │  TOTALES  │ $130.000 │       │ $5.800,00 │ $2.900,00   │          │ $2.900,00    │          │
+└──────────┴─────────────────────┴────────────┴───────────┴──────────┴───────┴───────────┴─────────────┴──────────┴──────────────┴──────────┘
+```
+
+**Filtros disponibles:**
+- Facturas / Notas de Crédito
+- Facturación Pendiente / Cobro Pendiente
+
+**Agrupar por:** Vendedor, Cliente, Fecha (mes)
+
+### Vista pivot (tabla dinámica)
+
+Cruza vendedores en filas con meses en columnas. Ideal para reportes mensuales de liquidación:
+
+```
+                          │  Enero 2026  │  Febrero 2026  │    Total
+──────────────────────────┼──────────────┼────────────────┼───────────
+  Juan Pérez              │              │                │
+    Comisión Total        │    $8.500    │     $5.800     │  $14.300
+    50% Facturación       │    $4.250    │     $2.900     │   $7.150
+    50% Cobro             │    $4.250    │     $2.900     │   $7.150
+    Base                  │  $180.000    │   $130.000     │ $310.000
+──────────────────────────┼──────────────┼────────────────┼───────────
+  María García            │              │                │
+    Comisión Total        │    $3.200    │     $4.100     │   $7.300
+    50% Facturación       │    $1.600    │     $2.050     │   $3.650
+    50% Cobro             │    $1.600    │     $2.050     │   $3.650
+    Base                  │   $95.000    │   $120.000     │ $215.000
+──────────────────────────┼──────────────┼────────────────┼───────────
+  TOTAL                   │   $11.700    │     $9.900     │  $21.600
+```
+
+Se puede personalizar arrastrando campos a filas/columnas/medidas. Ejemplos:
+- **Filas:** Vendedor → Cliente (sub-agrupamiento)
+- **Columnas:** Fecha por mes, por trimestre o por año
+- **Medidas:** Comisión Total, Base, 50% Facturación, 50% Cobro
+
+### Vista gráfico (barras)
+
+Gráfico de barras con el total de comisiones por vendedor. Útil para comparar rendimiento visual rápido.
+
+```
+  Comisión Total por Vendedor
+
+  Juan Pérez    ████████████████████████████  $14.300
+  María García  ██████████████████           $7.300
+  Pedro López   ████████████                 $5.100
+```
+
+### Smart button en factura
+
+Cada factura muestra un botón **"Comisiones"** (icono $) que lleva directo a los registros de comisión de esa factura. Solo visible si la factura tiene comisiones generadas.
+
+---
+
 ## Cómo funciona Odoo 17 (sin este módulo)
 
 Odoo 17 asigna un vendedor a cada factura vía `invoice_user_id` (heredado de `sale.order.user_id`), pero **no calcula comisiones**. Los campos estándar que aprovechamos:
@@ -23,18 +305,6 @@ Odoo 17 asigna un vendedor a cada factura vía `invoice_user_id` (heredado de `s
 | `categ_id` | `product.product` | Categoría del producto |
 | `state_id` | `res.partner` | Provincia del partner |
 | `country_id` | `res.partner` | País del partner |
-
-### Flujo estándar de facturación/cobro en Odoo 17
-
-```
-Pedido de Venta (sale.order)
-  → user_id = vendedor
-  → Confirmar → Crear Factura
-      → invoice_user_id = user_id (heredado)
-      → _post() → state = 'posted', payment_state = 'not_paid'
-      → Registrar Pago → Conciliación
-          → _compute_payment_state() → payment_state = 'paid'
-```
 
 ### Detalle técnico: `payment_state` es un stored computed field
 
@@ -51,13 +321,13 @@ def _compute_payment_state(self):
     # Determina: not_paid | partial | in_payment | paid | reversed
 ```
 
-**Punto crítico**: los stored computed fields **NO pasan por `write()`**. Odoo los persiste directo a DB vía `_write()` interno. Esto significa que un override de `write()` **nunca detectaría** el cambio de `payment_state`. La forma correcta de interceptarlo es overrideando `_compute_payment_state`.
+**Punto crítico**: los stored computed fields **NO pasan por `write()`**. Odoo los persiste directo a DB vía `_write()` interno. La forma correcta de interceptar el cambio de `payment_state` es overrideando `_compute_payment_state`.
 
 ---
 
-## Solución implementada
+## Arquitectura técnica
 
-### Arquitectura: 4 modelos
+### 4 modelos
 
 ```
 ┌─────────────────────────────┐
@@ -80,360 +350,183 @@ def _compute_payment_state(self):
 └─────────────────────────────┘
 ```
 
----
-
-### Modelo 0: `commission.zone`
-
-Define zonas geográficas para las reglas de comisión. Dos niveles:
-
-- **Zona provincial**: `state_id` seteado → matchea automáticamente por provincia del partner
-- **Sub-zona**: misma provincia, zona más específica → requiere asignación manual vía `commission_zone_id` en el partner
-
-#### Campos
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `name` | Char | Nombre (ej: "Buenos Aires", "Norte Buenos Aires") |
-| `country_id` | Many2one(`res.country`) | País (required) |
-| `state_id` | Many2one(`res.country.state`) | Provincia (vacío = todo el país) |
-| `active` | Boolean | Activo (default True) |
-| `company_id` | Many2one(`res.company`) | Compañía |
-
-#### Lógica de resolución: `_resolve_zone(partner)`
+### Código: `commission.zone` — Modelo de zonas
 
 ```python
-@api.model
-def _resolve_zone(self, partner):
-    """Resuelve la zona de comisión de un partner.
+class CommissionZone(models.Model):
+    _name = 'commission.zone'
+    _description = 'Zona de Comisión'
+    _order = 'country_id, state_id, name'
 
-    Prioridad:
-    1. commission_zone_id del partner (override manual, para sub-zonas)
-    2. Zona que matchee por state_id del partner (automática)
-    3. Sin zona
-    """
-    if partner.commission_zone_id:
-        return partner.commission_zone_id
+    name = fields.Char(string='Nombre', required=True)
+    country_id = fields.Many2one(
+        'res.country', string='País', required=True, index=True)
+    state_id = fields.Many2one(
+        'res.country.state', string='Provincia',
+        domain="[('country_id', '=', country_id)]",
+        help='Dejar vacío para aplicar a todo el país')
+    active = fields.Boolean(default=True)
+    company_id = fields.Many2one(
+        'res.company', string='Compañía',
+        default=lambda self: self.env.company)
 
-    if partner.state_id:
-        zone = self.search([
-            ('state_id', '=', partner.state_id.id),
-            ('country_id', '=', partner.country_id.id),
-        ], limit=1)
-        if zone:
-            return zone
+    @api.model
+    def _resolve_zone(self, partner):
+        """Resuelve la zona de comisión de un partner.
 
-    return self.browse()
+        Prioridad:
+        1. commission_zone_id del partner (override manual, para sub-zonas)
+        2. Zona que matchee por state_id del partner (automática)
+        3. Sin zona
+        """
+        if partner.commission_zone_id:
+            return partner.commission_zone_id
+
+        if partner.state_id:
+            zone = self.search([
+                ('state_id', '=', partner.state_id.id),
+                ('country_id', '=', partner.country_id.id),
+            ], limit=1)
+            if zone:
+                return zone
+
+        return self.browse()
 ```
 
-#### Ejemplo de zonas
-
-| Zona | País | Provincia |
-|------|------|-----------|
-| Buenos Aires | Argentina | Buenos Aires |
-| Norte Buenos Aires | Argentina | Buenos Aires |
-| Sur Buenos Aires | Argentina | Buenos Aires |
-| Córdoba | Argentina | Córdoba |
-| Santa Fe | Argentina | Santa Fe |
-
-#### Asignación de partners
-
-- **"Acme SA"** (state_id = Buenos Aires, commission_zone_id = vacío) → **auto-matchea zona "Buenos Aires"**
-- **"Ferretería López"** (state_id = Buenos Aires, commission_zone_id = "Norte Buenos Aires") → **usa sub-zona manual**
-- **"Constructor Sur SRL"** (state_id = Buenos Aires, commission_zone_id = "Sur Buenos Aires") → **usa sub-zona manual**
-
-### Extensión de `res.partner`
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `commission_zone_id` | Many2one(`commission.zone`) | Zona de comisión (override manual) |
-
----
-
-### Modelo 1: `salesperson.commission.rule`
-
-Define los porcentajes de comisión. La búsqueda usa **puntaje por especificidad** (una sola query):
-
-| Dimensión | Puntos |
-|-----------|--------|
-| `partner_id` presente | +4 |
-| `zone_id` presente | +2 |
-| `product_category_id` presente | +1 |
-
-Orden resultante (de mayor a menor prioridad):
-
-| Puntaje | Combinación |
-|---------|-------------|
-| 7 | vendedor + cliente + zona + categoría |
-| 6 | vendedor + cliente + zona |
-| 5 | vendedor + cliente + categoría |
-| 4 | vendedor + cliente |
-| 3 | vendedor + zona + categoría |
-| 2 | vendedor + zona |
-| 1 | vendedor + categoría |
-| 0 | vendedor solo (default) |
-
-#### Cómo configurar las reglas
-
-Las reglas se cargan en **Facturación → Comisiones → Reglas de Comisión** (acceso solo gerentes contables).
-
-**Regla sin cliente/zona/categoría = aplica a TODOS.** Es la comisión default del vendedor. Para diferenciar, se crean reglas adicionales más específicas que la overridean.
-
-#### Ejemplo práctico con zonas
-
-| # | Vendedor | Cliente | Zona | Categoría | % |
-|---|----------|---------|------|-----------|---|
-| R1 | Juan | *(vacío)* | *(vacío)* | *(vacío)* | 2% |
-| R2 | Juan | *(vacío)* | Buenos Aires | *(vacío)* | 4% |
-| R3 | Juan | *(vacío)* | Norte Buenos Aires | *(vacío)* | 5% |
-| R4 | Juan | *(vacío)* | Córdoba | Herramientas | 3% |
-| R5 | Juan | Acme SA | *(vacío)* | *(vacío)* | 6% |
-
-**Factura de "Ferretería López" (Norte BA)** → aplica R3 = 5% (zona Norte BA, puntaje 2)
-**Factura de "Acme SA" (BA)** → aplica R5 = 6% (cliente específico, puntaje 4 > zona puntaje 2)
-**Factura de cliente en Córdoba con Herramientas** → aplica R4 = 3% (zona + categoría, puntaje 3)
-**Factura de cliente en Santa Fe** → aplica R1 = 2% (default, no hay zona Santa Fe con regla)
-
-#### Campos
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `salesperson_id` | Many2one(`res.users`) | Vendedor (required) |
-| `partner_id` | Many2one(`res.partner`) | Cliente específico (vacío = todos) |
-| `zone_id` | Many2one(`commission.zone`) | Zona geográfica (vacío = todas) |
-| `product_category_id` | Many2one(`product.category`) | Categoría (vacío = todas) |
-| `commission_percentage` | Float | Porcentaje de comisión |
-| `active` | Boolean | Activo (default True) |
-| `company_id` | Many2one(`res.company`) | Compañía |
-
-#### Método principal: `_get_commission_percentage(salesperson, partner, category, zone)`
+### Código: `res.partner` — Campo zona en contacto
 
 ```python
-@api.model
-def _get_commission_percentage(self, salesperson, partner, category, zone=None):
-    """Busca la regla más específica con una sola query ordenada por puntaje.
+class ResPartner(models.Model):
+    _inherit = 'res.partner'
 
-    Patrón: Single-query specificity lookup — en vez de N búsquedas
-    secuenciales, usa domain con OR por campo y ordena por campos NOT NULL.
-    La regla más específica queda primera.
-    """
-    commercial_partner = partner.commercial_partner_id
-    zone_id = zone.id if zone else False
+    commission_zone_id = fields.Many2one(
+        'commission.zone', string='Zona de Comisión',
+        help='Asignar manualmente para sub-zonas. '
+             'Si está vacío, se resuelve automáticamente por provincia.')
+```
 
-    domain = [
-        ('salesperson_id', '=', salesperson.id),
-        ('company_id', 'in', [self.env.company.id, False]),
-        '|', ('partner_id', '=', commercial_partner.id), ('partner_id', '=', False),
-        '|', ('zone_id', '=', zone_id), ('zone_id', '=', False),
-        '|', ('product_category_id', '=', category.id), ('product_category_id', '=', False),
+Vista con filtro dinámico por país/provincia del contacto:
+
+```xml
+<field name="commission_zone_id"
+       domain="[('country_id', '=', country_id), ('state_id', '=', state_id)]"/>
+```
+
+### Código: `salesperson.commission.rule` — Reglas con búsqueda por especificidad
+
+```python
+class SalespersonCommissionRule(models.Model):
+    _name = 'salesperson.commission.rule'
+
+    salesperson_id = fields.Many2one('res.users', required=True, index=True)
+    partner_id = fields.Many2one('res.partner')
+    zone_id = fields.Many2one('commission.zone')
+    product_category_id = fields.Many2one('product.category')
+    commission_percentage = fields.Float(digits=(5, 2))
+    company_id = fields.Many2one('res.company', default=lambda self: self.env.company)
+
+    _sql_constraints = [
+        ('unique_rule',
+         'UNIQUE(salesperson_id, partner_id, zone_id, product_category_id, company_id)',
+         'Ya existe una regla para esta combinación.'),
     ]
-    rule = self.search(
-        domain,
-        order='partner_id DESC, zone_id DESC, product_category_id DESC',
-        limit=1,
-    )
-    if rule:
-        return rule, rule.commission_percentage
 
-    return self.browse(), 0.0
+    @api.model
+    def _get_commission_percentage(self, salesperson, partner, category, zone=None):
+        """Una sola query ordenada por especificidad.
+
+        ORDER BY partner_id DESC, zone_id DESC, product_category_id DESC
+        pone los campos NOT NULL primero → la regla más específica queda primera.
+        """
+        commercial_partner = partner.commercial_partner_id
+        zone_id = zone.id if zone else False
+
+        domain = [
+            ('salesperson_id', '=', salesperson.id),
+            ('company_id', 'in', [self.env.company.id, False]),
+            '|', ('partner_id', '=', commercial_partner.id), ('partner_id', '=', False),
+            '|', ('zone_id', '=', zone_id), ('zone_id', '=', False),
+            '|', ('product_category_id', '=', category.id), ('product_category_id', '=', False),
+        ]
+        rule = self.search(
+            domain,
+            order='partner_id DESC, zone_id DESC, product_category_id DESC',
+            limit=1,
+        )
+        if rule:
+            return rule, rule.commission_percentage
+        return self.browse(), 0.0
 ```
 
----
-
-### Modelo 2: `salesperson.commission`
-
-Un registro por cada combinación (factura, porcentaje). Si una factura tiene líneas con distintos porcentajes, se crean múltiples registros.
-
-#### Campos
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `move_id` | Many2one(`account.move`) | Factura origen |
-| `salesperson_id` | Many2one(`res.users`) | Vendedor |
-| `rule_id` | Many2one(`salesperson.commission.rule`) | Regla aplicada |
-| `partner_id` | Many2one (related) | Cliente |
-| `base_amount` | Monetary | Neto sin IVA (suma de `price_subtotal`) |
-| `commission_percentage` | Float | % aplicado |
-| `commission_amount` | Monetary | Comisión total = base × % |
-| `invoice_commission` | Monetary | 50% por facturación |
-| `collection_commission` | Monetary | 50% por cobro |
-| `invoice_status` | Selection | `pending` / `accrued` |
-| `collection_status` | Selection | `pending` / `accrued` |
-| `currency_id` | Many2one (related) | Moneda de la factura |
-| `date` | Date (related) | Fecha factura |
-| `move_type` | Selection (related) | Tipo de movimiento |
-
----
-
-### Modelo 3: `account.move` (herencia)
-
-Extiende la factura con comisiones y dos triggers automáticos.
-
-#### Campos agregados
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `commission_ids` | One2many(`salesperson.commission`) | Comisiones de esta factura |
-| `commission_count` | Integer (computed) | Cantidad (para smart button) |
-
-#### Override 1: `_post()` — Trigger de facturación
+### Código: `account.move` — Triggers de facturación y cobro
 
 ```python
-def _post(self, soft=True):
-    """Al confirmar factura/NC, calcula comisiones automáticamente."""
-    posted = super()._post(soft=soft)
-    for move in posted:
-        if move.move_type in ('out_invoice', 'out_refund'):
-            move._generate_commissions()
-    return posted
+class AccountMove(models.Model):
+    _inherit = 'account.move'
+
+    def _post(self, soft=True):
+        """Trigger 1: Al confirmar factura/NC, genera comisiones."""
+        posted = super()._post(soft=soft)
+        for move in posted:
+            if move.move_type in ('out_invoice', 'out_refund'):
+                move._generate_commissions()
+        return posted
+
+    @api.depends('amount_residual', 'move_type', 'state', 'company_id')
+    def _compute_payment_state(self):
+        """Trigger 2: Al cobrar, devenga el 50% de cobro."""
+        super()._compute_payment_state()
+        for move in self:
+            if (move.move_type == 'out_invoice'
+                    and move.payment_state in ('paid', 'in_payment')
+                    and move.commission_ids):
+                move.commission_ids.filtered(
+                    lambda c: c.collection_status == 'pending'
+                ).write({'collection_status': 'accrued'})
+
+    def _generate_commissions(self):
+        """Resuelve zona → busca regla por línea → agrupa por % → crea comisión 50/50."""
+        self.ensure_one()
+        if self.commission_ids:
+            return
+
+        salesperson = self.invoice_user_id
+        if not salesperson:
+            return
+
+        partner = self.partner_id
+        zone = self.env['commission.zone']._resolve_zone(partner)
+
+        grouped = defaultdict(float)  # {(rule_id, %): sum(price_subtotal)}
+
+        for line in self.invoice_line_ids:
+            if line.display_type != 'product' or not line.product_id:
+                continue
+            category = line.product_id.categ_id
+            rule, percentage = self.env['salesperson.commission.rule'] \
+                ._get_commission_percentage(salesperson, partner, category, zone)
+            if percentage > 0:
+                grouped[(rule.id, percentage)] += line.price_subtotal
+
+        is_refund = self.move_type == 'out_refund'
+        for (rule_id, percentage), base_amount in grouped.items():
+            if is_refund:
+                base_amount = -abs(base_amount)
+            commission_amount = base_amount * percentage / 100.0
+
+            self.env['salesperson.commission'].create({
+                'move_id': self.id,
+                'salesperson_id': salesperson.id,
+                'rule_id': rule_id or False,
+                'base_amount': base_amount,
+                'commission_percentage': percentage,
+                'commission_amount': commission_amount,
+                'invoice_commission': commission_amount / 2.0,
+                'collection_commission': commission_amount / 2.0,
+                'invoice_status': 'accrued',
+                'collection_status': 'accrued' if is_refund else 'pending',
+            })
 ```
-
-#### Override 2: `_compute_payment_state()` — Trigger de cobro
-
-```python
-@api.depends('amount_residual', 'move_type', 'state', 'company_id')
-def _compute_payment_state(self):
-    """Detecta cuando la factura pasa a 'paid' o 'in_payment'."""
-    super()._compute_payment_state()
-    for move in self:
-        if (move.move_type == 'out_invoice'
-                and move.payment_state in ('paid', 'in_payment')
-                and move.commission_ids):
-            move.commission_ids.filtered(
-                lambda c: c.collection_status == 'pending'
-            ).write({'collection_status': 'accrued'})
-```
-
-#### Método: `_generate_commissions()` — Cálculo con resolución de zona
-
-```python
-def _generate_commissions(self):
-    """Genera registros de comisión agrupados por regla/porcentaje.
-
-    Algoritmo:
-    1. Resuelve la zona del partner (manual → automática por provincia)
-    2. Para cada línea de producto (display_type == 'product')
-    3. Busca la regla más específica para vendedor/cliente/zona/categoría
-    4. Agrupa montos (price_subtotal) por (rule_id, percentage)
-    5. Crea un registro de comisión por grupo con split 50/50
-    """
-    self.ensure_one()
-    if self.commission_ids:
-        return
-
-    salesperson = self.invoice_user_id
-    if not salesperson:
-        return
-
-    partner = self.partner_id
-    RuleModel = self.env['salesperson.commission.rule']
-    ZoneModel = self.env['commission.zone']
-
-    # Resuelve zona una sola vez por factura
-    zone = ZoneModel._resolve_zone(partner)
-
-    grouped = defaultdict(float)
-
-    for line in self.invoice_line_ids:
-        if line.display_type != 'product':
-            continue
-        if not line.product_id:
-            continue
-
-        category = line.product_id.categ_id
-        rule, percentage = RuleModel._get_commission_percentage(
-            salesperson, partner, category, zone)
-
-        if percentage <= 0:
-            continue
-
-        grouped[(rule.id, percentage)] += line.price_subtotal
-
-    is_refund = self.move_type == 'out_refund'
-    CommissionModel = self.env['salesperson.commission']
-
-    for (rule_id, percentage), base_amount in grouped.items():
-        if is_refund:
-            base_amount = -abs(base_amount)
-
-        commission_amount = base_amount * percentage / 100.0
-        invoice_commission = commission_amount / 2.0
-        collection_commission = commission_amount / 2.0
-
-        CommissionModel.create({
-            'move_id': self.id,
-            'salesperson_id': salesperson.id,
-            'rule_id': rule_id or False,
-            'base_amount': base_amount,
-            'commission_percentage': percentage,
-            'commission_amount': commission_amount,
-            'invoice_commission': invoice_commission,
-            'collection_commission': collection_commission,
-            'invoice_status': 'accrued',
-            'collection_status': 'accrued' if is_refund else 'pending',
-        })
-```
-
----
-
-## Flujo completo
-
-### Factura de cliente
-
-```
-Factura confirmada (_post)
-  │
-  ├── Resuelve zona del partner:
-  │     └── commission_zone_id manual → o → búsqueda por state_id
-  │
-  ├── Por cada línea de producto:
-  │     └── Busca regla más específica (vendedor/cliente/zona/categoría) → obtiene %
-  │
-  ├── Agrupa líneas por (regla, %)
-  │
-  └── Crea registro(s) de comisión:
-        ├── commission_amount = base × %
-        ├── invoice_commission = 50% → invoice_status = 'accrued' ✓
-        └── collection_commission = 50% → collection_status = 'pending' ⏳
-
-Pago registrado → Conciliación → _compute_payment_state()
-  │
-  └── payment_state = 'paid'
-        └── collection_status = 'accrued' ✓
-```
-
-### Nota de Crédito
-
-```
-NC confirmada (_post)
-  │
-  └── Crea comisión NEGATIVA:
-        ├── base_amount = -|subtotal|
-        ├── commission_amount = negativo
-        ├── invoice_status = 'accrued' ✓ (inmediato)
-        └── collection_status = 'accrued' ✓ (inmediato)
-```
-
-### Ejemplo numérico
-
-Factura FA-A 0001-00000020 por $100.000 + IVA, vendedor Juan (comisión 5%):
-
-| Concepto | Valor |
-|----------|-------|
-| Base imponible | $100.000,00 |
-| Comisión total (5%) | $5.000,00 |
-| 50% facturación (devengado al confirmar) | $2.500,00 |
-| 50% cobro (devengado al cobrar) | $2.500,00 |
-
-Si después se emite NC por $20.000:
-
-| Concepto | Valor |
-|----------|-------|
-| Base imponible | -$20.000,00 |
-| Comisión total (5%) | -$1.000,00 |
-| 50% facturación | -$500,00 (devengado inmediato) |
-| 50% cobro | -$500,00 (devengado inmediato) |
-
-**Comisión neta del vendedor**: $5.000 - $1.000 = **$4.000**
 
 ---
 
@@ -446,50 +539,23 @@ Si después se emite NC por $20.000:
 
 ---
 
-## Vistas
-
-| Vista | Modelo | Descripción |
-|-------|--------|-------------|
-| Tree + Form + Search | `commission.zone` | ABM de zonas geográficas |
-| Tree + Form + Search | `salesperson.commission.rule` | ABM de reglas |
-| Tree + Form + Search | `salesperson.commission` | Listado de comisiones |
-| Pivot | `salesperson.commission` | Tabla cruzada vendedor × mes |
-| Graph | `salesperson.commission` | Gráfico de barras por vendedor |
-| Smart button | `account.move` (herencia) | Botón "Comisiones" en factura |
-
-### Menú
-
-```
-Facturación
-  └── Comisiones
-        ├── Comisiones (listado)
-        ├── Reglas de Comisión (solo gerentes)
-        └── Zonas (solo gerentes)
-```
-
----
-
 ## Decisiones técnicas
 
 ### Por qué una sola query en vez de N búsquedas secuenciales
 
-El método anterior hacía 4 búsquedas (prioridad 1 → 4). Con zonas serían 8. La nueva implementación usa un solo `search()` con domain OR y `ORDER BY ... DESC` que ordena los campos NOT NULL primero. El resultado: la regla más específica siempre queda primera. Más eficiente y escalable a nuevas dimensiones.
+El método anterior hacía 4 búsquedas (prioridad 1 → 4). Con zonas serían 8. La nueva implementación usa un solo `search()` con domain OR y `ORDER BY ... DESC` que ordena los campos NOT NULL primero. La regla más específica siempre queda primera. Una query en vez de ocho.
 
 ### Por qué `_compute_payment_state` y no `write()`
 
-Los **stored computed fields** en Odoo 17 se recomputan cuando cambian sus dependencias (`amount_residual`, `state`, etc.) y se persisten a DB vía el método interno `_write()`, que **no pasa por el `write()` público**. Un override de `write()` nunca detectaría el cambio de `payment_state`.
-
-### Por qué `payment_state` y no `amount_residual == 0`
-
-En operaciones multi-moneda, diferencias de tipo de cambio pueden hacer que `amount_residual` no llegue exactamente a 0. El campo `payment_state` considera la reconciliación contable completa y es más confiable.
+Los stored computed fields se persisten vía `_write()` interno, que NO pasa por `write()` público. Un override de `write()` nunca detectaría el cambio de `payment_state`.
 
 ### Por qué `price_subtotal` como base
 
-`price_subtotal` es el neto sin IVA por línea. Es el estándar para comisiones comerciales — el vendedor cobra sobre el valor del producto, no sobre los impuestos.
+El vendedor cobra sobre el valor del producto, no sobre los impuestos. `price_subtotal` es el neto sin IVA por línea.
 
 ### Por qué `commercial_partner_id` para buscar reglas
 
-En Odoo, un cliente puede tener múltiples contactos (direcciones de envío, facturación). `commercial_partner_id` normaliza al partner comercial raíz, asegurando que la regla aplique sin importar qué contacto se use en la factura.
+Un cliente puede tener múltiples contactos (envío, facturación). `commercial_partner_id` normaliza al partner comercial raíz, asegurando que la regla aplique sin importar qué contacto se use en la factura.
 
 ---
 
@@ -510,12 +576,13 @@ En Odoo, un cliente puede tener múltiples contactos (direcciones de envío, fac
 
 ## Verificación
 
-1. **Zonas**: Crear zonas "Buenos Aires", "Norte Buenos Aires", "Córdoba"
-2. **Partners**: Asignar partner a sub-zona "Norte Buenos Aires" vía `commission_zone_id`
-3. **Reglas**: Crear regla vendedor + zona "Norte Buenos Aires" → 5%
-4. **Facturación con zona**: Facturar al partner → verificar que aplica 5%
-5. **Zona automática**: Facturar a partner en Buenos Aires sin sub-zona → verificar matcheo provincial
-6. **Prioridad cliente > zona**: Facturar a partner con regla de cliente específica → verificar que cliente gana sobre zona
-7. **Cobro**: Registrar pago total → verificar `collection_status = accrued`
-8. **NC**: Crear NC → verificar comisión negativa con ambos status `accrued`
-9. **Reportes**: Pivot por vendedor/mes → verificar totales
+1. **Crear zonas**: "Buenos Aires" (provincia BA), "Norte Buenos Aires" (provincia BA), "Córdoba" (provincia Cba)
+2. **Asignar sub-zona**: Abrir un contacto de BA → Ventas y compras → Zona de Comisión = "Norte Buenos Aires"
+3. **Crear reglas**: Vendedor + zona "Norte Buenos Aires" → 5%, Vendedor solo → 2%
+4. **Facturar al contacto con sub-zona**: Verificar que aplica 5%
+5. **Facturar a contacto de BA sin sub-zona**: Verificar matcheo automático zona "Buenos Aires"
+6. **Facturar a contacto con regla de cliente**: Verificar que cliente (puntaje 4) gana sobre zona (puntaje 2)
+7. **Factura mixta**: Dos categorías con distintas reglas → verificar dos registros de comisión
+8. **Registrar pago total**: Verificar que 50% cobro pasa a `Devengado`
+9. **Emitir NC**: Verificar comisión negativa con ambos 50% devengados
+10. **Pivot**: Agrupar por vendedor y mes → verificar totales
