@@ -5,3 +5,5 @@ access_commission_rule_manager,salesperson.commission.rule.manager,model_salespe
 access_commission_rule_user,salesperson.commission.rule.user,model_salesperson_commission_rule,account.group_account_invoice,1,0,0,0
 access_commission_manager,salesperson.commission.manager,model_salesperson_commission,account.group_account_manager,1,1,1,1
 access_commission_user,salesperson.commission.user,model_salesperson_commission,account.group_account_invoice,1,0,0,0
+access_commission_vendor_bill_wizard_manager,commission.create.vendor.bill.manager,model_commission_create_vendor_bill,account.group_account_manager,1,1,1,1
+access_commission_vendor_bill_wizard_user,commission.create.vendor.bill.user,model_commission_create_vendor_bill,account.group_account_invoice,1,0,0,0

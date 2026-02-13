@@ -132,3 +132,25 @@ class AccountMove(models.Model):
                 # Por qué: NC devenga ambos 50% al instante (descuenta de una)
                 'collection_status': 'accrued' if is_refund else 'pending',
             })
+
+    def button_draft(self):
+        """Override: al pasar a borrador una factura de proveedor de comisiones,
+        limpia los vínculos en las comisiones asociadas.
+
+        Por qué: Si el bill se cancela/vuelve a borrador, las comisiones deben
+        volver a quedar disponibles para refacturar.
+        """
+        # Por qué: Buscar comisiones vinculadas ANTES del super (el move aún tiene state)
+        vendor_bills = self.filtered(lambda m: m.move_type == 'in_invoice')
+        if vendor_bills:
+            Commission = self.env['salesperson.commission']
+            for bill in vendor_bills:
+                # Limpiar vínculos de facturación
+                Commission.search([
+                    ('invoice_vendor_bill_id', '=', bill.id)
+                ]).write({'invoice_vendor_bill_id': False})
+                # Limpiar vínculos de cobro
+                Commission.search([
+                    ('collection_vendor_bill_id', '=', bill.id)
+                ]).write({'collection_vendor_bill_id': False})
+        return super().button_draft()

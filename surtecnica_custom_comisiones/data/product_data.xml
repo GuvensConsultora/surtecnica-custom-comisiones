@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <!-- Producto servicio para líneas de factura de proveedor de comisiones -->
+        <record id="product_commission" model="product.product">
+            <field name="name">Comisión por Ventas</field>
+            <field name="type">service</field>
+            <field name="categ_id" ref="product.product_category_all"/>
+            <field name="sale_ok" eval="False"/>
+            <field name="purchase_ok" eval="True"/>
+            <field name="list_price">0.0</field>
+            <field name="standard_price">0.0</field>
+        </record>
+
+    </data>
+</odoo>

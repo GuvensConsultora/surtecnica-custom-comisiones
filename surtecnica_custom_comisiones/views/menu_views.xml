@@ -27,4 +27,11 @@
               sequence="30"
               groups="account.group_account_manager"/>
 
+    <menuitem id="menu_commission_billing"
+              name="Facturación de Comisiones"
+              parent="menu_commission_root"
+              action="salesperson_commission_action"
+              sequence="15"
+              groups="account.group_account_manager"/>
+
 </odoo>

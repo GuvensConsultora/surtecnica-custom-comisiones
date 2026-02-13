@@ -25,6 +25,18 @@
                        decoration-success="collection_status == 'accrued'"
                        decoration-warning="collection_status == 'pending'"
                        widget="badge"/>
+                <field name="billed_amount" sum="Total Facturado Prov." optional="show"/>
+                <field name="billing_status"
+                       decoration-success="billing_status == 'billed'"
+                       decoration-info="billing_status == 'partial'"
+                       decoration-warning="billing_status == 'pending'"
+                       widget="badge" optional="show"/>
+                <field name="paid_amount" sum="Total Pagado Prov." optional="show"/>
+                <field name="payment_status"
+                       decoration-success="payment_status == 'paid'"
+                       decoration-info="payment_status == 'partial'"
+                       decoration-warning="payment_status == 'pending'"
+                       widget="badge" optional="show"/>
                 <field name="currency_id" column_invisible="True"/>
             </tree>
         </field>
@@ -62,6 +74,18 @@
                             <field name="collection_status" widget="badge"/>
                         </group>
                     </group>
+                    <group string="Facturación a Proveedor">
+                        <group>
+                            <field name="invoice_vendor_bill_id"/>
+                            <field name="collection_vendor_bill_id"/>
+                        </group>
+                        <group>
+                            <field name="billing_status" widget="badge"/>
+                            <field name="billed_amount"/>
+                            <field name="payment_status" widget="badge"/>
+                            <field name="paid_amount"/>
+                        </group>
+                    </group>
                 </sheet>
             </form>
         </field>
@@ -86,6 +110,13 @@
                 <filter name="collection_pending" string="Cobro Pendiente"
                         domain="[('collection_status', '=', 'pending')]"/>
                 <separator/>
+                <filter name="billing_pending" string="Sin Facturar Prov."
+                        domain="[('billing_status', '=', 'pending')]"/>
+                <filter name="billing_billed" string="Facturado Prov."
+                        domain="[('billing_status', '=', 'billed')]"/>
+                <filter name="payment_paid" string="Pagado Prov."
+                        domain="[('payment_status', '=', 'paid')]"/>
+                <separator/>
                 <filter name="group_salesperson" string="Vendedor"
                         context="{'group_by': 'salesperson_id'}"/>
                 <filter name="group_partner" string="Cliente"
@@ -108,6 +139,8 @@
                 <field name="invoice_commission" type="measure"/>
                 <field name="collection_commission" type="measure"/>
                 <field name="base_amount" type="measure"/>
+                <field name="billed_amount" type="measure"/>
+                <field name="paid_amount" type="measure"/>
             </pivot>
         </field>
     </record>
